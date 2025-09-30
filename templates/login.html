@@ -6,17 +6,26 @@
         <div class="card shadow-sm">
             <div class="card-body">
                 <h2 class="card-title text-center mb-4">Login</h2>
-                <form method="post" action="{{ url_for('login') }}">
+                
+                <a href="{{ url_for('google_login') }}" class="btn btn-danger w-100 mb-3">
+                    <img src="https://img.icons8.com/color/24/000000/google-logo.png" alt="Google icon" style="vertical-align: middle; margin-right: 8px;">
+                    Sign in with Google
+                </a>
+                
+                <hr>
+                
+                <form method="post" action="{{ url_for('local_login') }}">
                     <div class="mb-3">
-                        <label for="username" class="form-label">Username</label>
-                        <input type="text" class="form-control" id="username" name="username" required autofocus>
+                        <label for="username" class="form-label">Username (Email)</label>
+                        <input type="email" class="form-control" id="username" name="username" required autofocus>
                     </div>
                     <div class="mb-3">
                         <label for="password" class="form-label">Password</label>
                         <input type="password" class="form-control" id="password" name="password" required readonly onfocus="this.removeAttribute('readonly');">
                     </div>
-                    <button type="submit" class="btn btn-primary w-100">Login</button>
+                    <button type="submit" class="btn btn-primary w-100">Login with Email</button>
                 </form>
+
                 <div class="text-center mt-3">
                     <p>Don't have an account? <a href="{{ url_for('register') }}">Create one</a></p>
                 </div>
