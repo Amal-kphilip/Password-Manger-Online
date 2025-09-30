@@ -3,3 +3,4 @@ cryptography
 gunicorn
 psycopg2-binary
 SQLAlchemy
+Authlib
