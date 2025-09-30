@@ -1,144 +1,65 @@
-import sqlite3
-from cryptography.fernet import Fernet
 import os
+from cryptography.fernet import Fernet
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
+from sqlalchemy.orm import sessionmaker, declarative_base, relationship
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash
 
-DB_NAME = 'passwords.db'
-KEY_FILE = 'secret.key'
+# Use an environment variable for the database URL, fallback to local SQLite
+DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///passwords.db')
 
-# --- Key Management (Unchanged) ---
-def generate_key():
-    key = Fernet.generate_key()
-    with open(KEY_FILE, "wb") as key_file:
-        key_file.write(key)
-    return key
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
-def load_key():
-    if not os.path.exists(KEY_FILE):
-        return generate_key()
-    return open(KEY_FILE, "rb").read()
+# --- Encryption Key Management ---
+# For production, set ENCRYPTION_KEY as an environment variable
+key_str = os.environ.get('ENCRYPTION_KEY')
+if not key_str:
+    # Fallback for local dev: generate/load from file (NOT FOR PRODUCTION)
+    if os.path.exists('secret.key'):
+        with open('secret.key', 'rb') as f:
+            key = f.read()
+    else:
+        key = Fernet.generate_key()
+        with open('secret.key', 'wb') as f:
+            f.write(key)
+else:
+    key = key_str.encode()
 
-key = load_key()
 cipher_suite = Fernet(key)
 
-# --- Database Initialization (Updated) ---
+# --- SQLAlchemy Models ---
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    passwords = relationship("PasswordEntry", back_populates="owner", cascade="all, delete-orphan")
+
+class PasswordEntry(Base):
+    __tablename__ = "passwords"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String, nullable=False)
+    url = Column(String, nullable=False)
+    username = Column(String, nullable=False)
+    encrypted_password = Column(String, nullable=False)
+    owner = relationship("User", back_populates="passwords")
+
+# --- Database Functions ---
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL
-        )
-    ''')
-    # CHANGED: Added a 'name' column and renamed 'website' to 'url' for clarity
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS passwords (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            url TEXT NOT NULL,
-            username TEXT NOT NULL,
-            encrypted_password TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    Base.metadata.create_all(bind=engine)
 
-# --- User Management (Unchanged) ---
-def create_user(username, password):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+def get_db():
+    db = SessionLocal()
     try:
-        cursor.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, generate_password_hash(password)))
-        conn.commit()
-    except sqlite3.IntegrityError:
-        return False
+        yield db
     finally:
-        conn.close()
-    return True
+        db.close()
 
-def get_user_by_username(username):
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
-    user = cursor.fetchone()
-    conn.close()
-    return user
-
-# --- Password Functions (Updated & New) ---
 def encrypt_password(password):
     return cipher_suite.encrypt(password.encode()).decode()
 
 def decrypt_password(encrypted_password):
     return cipher_suite.decrypt(encrypted_password.encode()).decode()
-
-# CHANGED: Now handles 'name' and 'url'
-def add_password(name, url, username, password, user_id):
-    encrypted = encrypt_password(password)
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO passwords (name, url, username, encrypted_password, user_id) VALUES (?, ?, ?, ?, ?)",
-        (name, url, username, encrypted, user_id)
-    )
-    conn.commit()
-    conn.close()
-
-# CHANGED: Now fetches 'name' and 'url'
-def get_all_passwords(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, name, url, username, encrypted_password FROM passwords WHERE user_id = ?", (user_id,))
-    entries = []
-    for row in cursor.fetchall():
-        try:
-            decrypted_password = decrypt_password(row[4])
-            entries.append({
-                'id': row[0], 'name': row[1], 'url': row[2],
-                'username': row[3], 'password': decrypted_password
-            })
-        except Exception:
-            # Handle decryption error
-            pass
-    conn.close()
-    return entries
-
-def delete_password(entry_id, user_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM passwords WHERE id = ? AND user_id = ?", (entry_id, user_id))
-    conn.commit()
-    conn.close()
-
-# NEW: Function to get a single password entry for editing
-def get_password_by_id(entry_id, user_id):
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM passwords WHERE id = ? AND user_id = ?", (entry_id, user_id))
-    entry = cursor.fetchone()
-    if entry:
-        decrypted_password = decrypt_password(entry['encrypted_password'])
-        return {
-            'id': entry['id'], 'name': entry['name'], 'url': entry['url'],
-            'username': entry['username'], 'password': decrypted_password
-        }
-    conn.close()
-    return None
-
-# NEW: Function to update an existing password entry
-def update_password(entry_id, name, url, username, password, user_id):
-    encrypted = encrypt_password(password)
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(
-        '''UPDATE passwords SET name = ?, url = ?, username = ?, encrypted_password = ?
-           WHERE id = ? AND user_id = ?''',
-        (name, url, username, encrypted, entry_id, user_id)
-    )
-    conn.commit()
-    conn.close()
