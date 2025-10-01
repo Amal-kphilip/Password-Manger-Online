@@ -10,7 +10,7 @@ import database as db
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'a_default_local_secret_key')
 
-# --- OAuth (Google Sign-In) Configuration ---
+# OAuth Configuration (Unchanged)
 oauth = OAuth(app)
 google = oauth.register(
     name='google',
@@ -26,7 +26,7 @@ google = oauth.register(
     jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
 )
 
-# --- Database Session Management (Unchanged) ---
+# Database Session Management (Unchanged)
 @app.before_request
 def before_request():
     g.db = db.SessionLocal()
@@ -37,7 +37,7 @@ def teardown_request(exception=None):
     if db_session is not None:
         db_session.close()
 
-# --- Decorator and Auth Routes (Updated) ---
+# Decorator (Unchanged)
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -46,22 +46,21 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# Local Registration
+# --- Auth Routes (Updated) ---
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    # This logic remains for users who want a traditional account
-    # ... (code for this route is unchanged)
     if request.method == 'POST':
-        username = request.form['username']
+        username = request.form['username'].strip() # Use .strip() to remove whitespace
         password = request.form['password']
         if not username or not password:
             flash('Username and password are required.', 'danger')
             return redirect(url_for('register'))
         
-        # Check if email is already used by a local account
-        existing_user = g.db.query(db.User).filter(db.User.username == username, db.User.google_id == None).first()
+        # CHANGED: Check if username (or an email matching it) is already taken
+        existing_user = g.db.query(db.User).filter(db.User.username == username).first()
         if existing_user:
-            flash('This email is already registered. Please log in.', 'danger')
+            flash('Username is already taken. Please choose a different one.', 'danger')
             return redirect(url_for('register'))
 
         new_user = db.User(username=username, password_hash=generate_password_hash(password))
@@ -73,17 +72,15 @@ def register():
             
     return render_template('register.html')
 
-
-# Local Login
 @app.route('/login')
 def login():
     return render_template('login.html')
 
 @app.route('/login/local', methods=['POST'])
 def local_login():
-    # This logic is mostly unchanged
     username = request.form['username']
     password = request.form['password']
+    # This query correctly finds local accounts only
     user = g.db.query(db.User).filter(db.User.username == username, db.User.google_id == None).first()
 
     if user and check_password_hash(user.password_hash, password):
@@ -97,7 +94,6 @@ def local_login():
         flash('Incorrect username or password.', 'danger')
         return redirect(url_for('login'))
 
-# Google Login Routes
 @app.route('/google/login')
 def google_login():
     redirect_uri = url_for('google_callback', _external=True)
@@ -112,11 +108,16 @@ def google_callback():
         google_id = userinfo['sub']
         email = userinfo['email']
         
-        # Find user by Google ID
         user = g.db.query(db.User).filter(db.User.google_id == google_id).first()
 
         if not user:
-            # If user doesn't exist, create a new one
+            # CHANGED: Check if the Google email is already taken by a local username
+            existing_local_user = g.db.query(db.User).filter(db.User.username == email, db.User.google_id == None).first()
+            if existing_local_user:
+                flash('This email is already registered to a local account. Please log in with your username and password.', 'danger')
+                return redirect(url_for('login'))
+            
+            # If no conflict, create a new Google-linked user
             user = db.User(username=email, google_id=google_id)
             g.db.add(user)
         
@@ -131,13 +132,12 @@ def google_callback():
     flash('Google login failed. Please try again.', 'danger')
     return redirect(url_for('login'))
 
-
 @app.route('/logout')
 def logout():
     session.clear()
     return redirect(url_for('login'))
 
-# ... (The rest of your routes: index, edit, delete remain the same) ...
+# --- Main Password Manager Routes (Unchanged) ---
 @app.route('/', methods=['GET', 'POST'])
 @login_required
 def index():
