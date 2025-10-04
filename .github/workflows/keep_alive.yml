@@ -1,23 +1,17 @@
 name: Keep Alive Ping
 
-# This workflow is scheduled to run every 15 minutes.
-# This prevents Render's free tier from spinning down your service due to inactivity.
 on:
   schedule:
-    # Cron expression: Runs at 0, 15, 30, and 45 minutes past the hour.
-    # Render's free tier spins down after 15 minutes of inactivity.
+    # Runs every 14 minutes
     - cron: '*/14 * * * *'
-  # Allows you to manually trigger the job from the GitHub Actions tab.
   workflow_dispatch:
 
 jobs:
   ping_service:
     runs-on: ubuntu-latest
     steps:
-      - name: Send keep-alive request
-        # This command uses curl to send a simple request to your application's URL.
-        # -sS suppresses progress/error output, and --fail ensures a failure on bad status codes.
+      - name: Send keep-alive request (Ignoring 404 Error)
         run: |
-          # 🚨 IMPORTANT: Replace the placeholder below with your actual Render URL
-          # Your URL is: https://password-manger-jwwi.onrender.com
-          curl -sS --fail "https://password-manger-jwwi.onrender.com"
+          # The --fail flag has been removed. 
+          # The -sS flags suppress output but still ensure curl runs.
+          curl -sS "https://password-manger-jwwi.onrender.com"
