@@ -2,8 +2,8 @@ name: Keep Alive Ping
 
 on:
   schedule:
-    # Runs every 14 minutes
-    - cron: '*/14 * * * *'
+    # 🚨 Change the interval to 10 minutes for a safer buffer.
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -12,6 +12,5 @@ jobs:
     steps:
       - name: Send keep-alive request (Ignoring 404 Error)
         run: |
-          # The --fail flag has been removed. 
-          # The -sS flags suppress output but still ensure curl runs.
+          # The -sS flags suppress output, allowing the 404 to pass without failing the action.
           curl -sS "https://password-manger-jwwi.onrender.com"
